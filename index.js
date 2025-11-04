@@ -1,16 +1,16 @@
 const express = require("express");
 const cors = require("cors");
+require('dotenv').config();
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const app = express();
 const port = process.env.PORT || 3000;
 
-// smartdbUser
-//a7sV0FMAsckdsz2B
+
 
 const uri =
-  "mongodb+srv://smartdbUser:a7sV0FMAsckdsz2B@simplecrudserver.fyfvvbn.mongodb.net/?appName=simpleCRUDserver";
+  `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@simplecrudserver.fyfvvbn.mongodb.net/?appName=simpleCRUDserver`;
 
-// Create a MongoClient with a MongoClientOptions object to set the Stable API version
+// Create MongoDB client with options
 const client = new MongoClient(uri, {
   serverApi: {
     version: ServerApiVersion.v1,
@@ -20,8 +20,8 @@ const client = new MongoClient(uri, {
 });
 
 // middleware
-app.use(cors());
-app.use(express.json());
+app.use(cors()); // allow cross-origin requests
+app.use(express.json()); // parse JSON bodies
 
 app.get("/", (req, res) => {
   res.send("Smart Deals server running !");
@@ -29,71 +29,150 @@ app.get("/", (req, res) => {
 
 async function run() {
   try {
-    await client.connect();
+    await client.connect(); // connect to MongoDB
 
-    const db = client.db('smart_db');
-    const productsCollection = db.collection('products');
+    // create database and collection references
+    const db = client.db("smart_db");
+    const productsCollection = db.collection("products");
+    const bidsCollection = db.collection("bids");
+    const usersCollection = db.collection("users");
 
-    app.get('/products', async (req, res) => {
-      const cursor = productsCollection.find();
+    // get all products or filter by email
+    app.get("/products", async (req, res) => {
+      console.log(req.query);
+      const email = req.query.email;
+      const query = {};
+      if (email) {
+        query.email = email;
+      }
+      const cursor = productsCollection.find(query);
       const result = await cursor.toArray();
       res.send(result);
     });
 
-    app.get( '/products/:id', async (req, res) => {
-      const id = req.params.id;
-      const query = { _id: new ObjectId(id)};
+    // get latest 6 products
+    app.get("/latest-products", async (req, res) => {
+      const cursor = productsCollection
+        .find()
+        .sort({ created_at: -1 })
+        .limit(6);
+      const result = await cursor.toArray();
+      res.send(result);
+    });
+
+    // get single product by id (string id, not ObjectId)
+    app.get("/products/:id", async (req, res) => {
+      const id = req.params.id; // get id from URL
+      const query = { _id: id }; // match _id as string
       const result = await productsCollection.findOne(query);
       res.send(result);
-    })
+    });
 
-    app.post('/products', async (req, res) => {
+    // add a new product
+    app.post("/products", async (req, res) => {
       const newProduct = req.body;
       const result = await productsCollection.insertOne(newProduct);
       res.send(result);
-    })
+    });
 
-    app.patch('/products/:id', async (req, res) => {
+    // update a product (this expects _id as ObjectId)
+    app.patch("/products/:id", async (req, res) => {
       const id = req.params.id;
       const updatedProduct = req.body;
-      const query = { _id: new ObjectId(id)};
+      const query = { _id: new ObjectId(id) }; // convert id to ObjectId
       const update = {
         $set: {
           name: updatedProduct.name,
-          price: updatedProduct.price
-        }
-      }
-      const result = await productsCollection.updateOne(query,update);
+          price: updatedProduct.price,
+        },
+      };
+      const result = await productsCollection.updateOne(query, update);
       res.send(result);
-    })
+    });
 
-    app.delete('/products/:id', async (req, res) => {
+    // delete one product by ObjectId
+    app.delete("/products/:id", async (req, res) => {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
       const result = await productsCollection.deleteOne(query);
       res.send(result);
+    });
 
-    })
+    // delete all products
+    app.delete("/products", async (req, res) => {
+      const result = await productsCollection.deleteMany({});
+      res.send(result);
+    });
 
+    // get all bids or filter by buyer email
+    app.get("/bids", async (req, res) => {
+      const email = req.query.email;
+      const query = {};
+      if (email) {
+        query.buyer_email = email;
+      }
+      const cursor = bidsCollection.find(query);
+      const result = await cursor.toArray();
+      res.send(result);
+    });
+
+    app.get("/products/bids/:productId", async (req, res) => {
+      const productId = req.params.productId;
+      const query = { product: productId };
+      const cursor = bidsCollection.find(query).sort({ bid_price: -1 });
+      const result = await cursor.toArray();
+      res.send(result);
+    });
+    
+    // add a new bid
+    app.post("/bids", async (req, res) => {
+      const newBid = req.body;
+
+      const result = await bidsCollection.insertOne(newBid);
+
+      res.send(result);
+    });
+
+    // delete a bid by ObjectId
+    app.delete("/bids/:id", async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await bidsCollection.deleteOne(query);
+      res.send(result);
+    });
+
+    // add user only if not exists
+    app.post("/users", async (req, res) => {
+      const newUser = req.body;
+      const email = req.body.email;
+      const query = { email: email };
+      const existingUser = await usersCollection.findOne(query);
+
+      if (existingUser) {
+        res.send("user already exist. do not need to insert again");
+      } else {
+        const result = await usersCollection.insertOne(newUser);
+        res.send(result);
+      }
+    });
+
+    // test connection
     await client.db("admin").command({ ping: 1 });
-    console.log(
-      "Pinged your deployment. You successfully connected to MongoDB!"
-    );
+    console.log("Connected to MongoDB successfully!");
   } finally {
   }
 }
 run().catch(console.dir);
 
 app.listen(port, () => {
-  console.log(`Smart Deals server listening on this port ${port}`);
+  console.log(`Smart Deals server listening on port ${port}`);
 });
 
-// Another way to connect to MongoDB
-
+// another way to connect to MongoDB
 // client.connect()
-// .then(() =>{
+//   .then(() => {
 //     app.listen(port, () => {
-//     console.log(`Smart Deals server listening on this port ${port}`)
-// })
-// })
-// .catch(console.dir)
+//       console.log(`Smart Deals server listening on port ${port}`)
+//     })
+//   })
+//   .catch(console.dir)
