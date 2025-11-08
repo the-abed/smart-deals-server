@@ -22,6 +22,16 @@ const client = new MongoClient(uri, {
 // middleware
 app.use(cors()); // allow cross-origin requests
 app.use(express.json()); // parse JSON bodies
+const logger = (req, res, next) =>{
+  console.log('logging info');
+  next();
+}
+
+const verifyFirebaseToken  = (req, res, next) =>{
+  console.log('in the verify middleware', req.headers.authorization );
+
+  next();
+}
 
 app.get("/", (req, res) => {
   res.send("Smart Deals server running !");
@@ -105,7 +115,8 @@ async function run() {
     });
 
     // get all bids or filter by buyer email
-    app.get("/bids", async (req, res) => {
+    app.get("/bids", logger, verifyFirebaseToken, async (req, res) => {
+      // console.log('header' , req.headers)
       const email = req.query.email;
       const query = {};
       if (email) {
