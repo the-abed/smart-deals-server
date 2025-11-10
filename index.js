@@ -1,14 +1,40 @@
 const express = require("express");
 const cors = require("cors");
-require('dotenv').config();
+require("dotenv").config();
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const app = express();
 const port = process.env.PORT || 3000;
 
+const admin = require("firebase-admin");
 
+const serviceAccount = require("./smart-deals-e8695-firebase-admin-key.json");
 
-const uri =
-  `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@simplecrudserver.fyfvvbn.mongodb.net/?appName=simpleCRUDserver`;
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+});
+
+// middleware
+app.use(cors()); // allow cross-origin requests
+app.use(express.json()); // parse JSON bodies
+
+const verifyFireBaseToken = async (req, res, next) => {
+  const authorization = req.headers.authorization;
+  if (!authorization) {
+    return res.status(401).send({ message: "unauthorized access" });
+  }
+  const token = authorization.split(" ")[1];
+
+  try {
+    const decoded = await admin.auth().verifyIdToken(token);
+    console.log("inside token", decoded);
+    req.token_email = decoded.email;
+    next();
+  } catch (error) {
+    return res.status(401).send({ message: "unauthorized access" });
+  }
+};
+
+const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@simplecrudserver.fyfvvbn.mongodb.net/?appName=simpleCRUDserver`;
 
 // Create MongoDB client with options
 const client = new MongoClient(uri, {
@@ -18,20 +44,6 @@ const client = new MongoClient(uri, {
     deprecationErrors: true,
   },
 });
-
-// middleware
-app.use(cors()); // allow cross-origin requests
-app.use(express.json()); // parse JSON bodies
-const logger = (req, res, next) =>{
-  console.log('logging info');
-  next();
-}
-
-const verifyFirebaseToken  = (req, res, next) =>{
-  console.log('in the verify middleware', req.headers.authorization );
-
-  next();
-}
 
 app.get("/", (req, res) => {
   res.send("Smart Deals server running !");
@@ -48,7 +60,7 @@ async function run() {
     const usersCollection = db.collection("users");
 
     // get all products or filter by email
-    app.get("/products", async (req, res) => {
+    app.get("/products", verifyFireBaseToken, async (req, res) => {
       console.log(req.query);
       const email = req.query.email;
       const query = {};
@@ -79,7 +91,8 @@ async function run() {
     });
 
     // add a new product
-    app.post("/products", async (req, res) => {
+    app.post("/products", verifyFireBaseToken, async (req, res) => {
+      console.log("headers", req.headers);
       const newProduct = req.body;
       const result = await productsCollection.insertOne(newProduct);
       res.send(result);
@@ -115,12 +128,14 @@ async function run() {
     });
 
     // get all bids or filter by buyer email
-    app.get("/bids", logger, verifyFirebaseToken, async (req, res) => {
-      // console.log('header' , req.headers)
+    app.get("/bids", verifyFireBaseToken, async (req, res) => {
       const email = req.query.email;
       const query = {};
       if (email) {
         query.buyer_email = email;
+        if (email !== req.token_email) {
+          return res.status(403).send({ message: "forbidden access" });
+        }
       }
       const cursor = bidsCollection.find(query);
       const result = await cursor.toArray();
@@ -134,7 +149,7 @@ async function run() {
       const result = await cursor.toArray();
       res.send(result);
     });
-    
+
     // add a new bid
     app.post("/bids", async (req, res) => {
       const newBid = req.body;
